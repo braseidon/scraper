@@ -1,6 +1,6 @@
 {
     "name": "braseidon/scraper",
-    "description": "Braseidon\Scraper is a multi-threaded CURL wrapper for Laravel 5 that is a highly efficient web scraper.",
+    "description": "Scraper is a multi-threaded CURL wrapper for Laravel 5 that is a highly efficient web scraper.",
     "type": "library",
     "keywords": ["php", "laravel", "rollingcurl", "scrape", "web scraper", "scraping"],
     "homepage": "https://github.com/braseidon/scraper",
