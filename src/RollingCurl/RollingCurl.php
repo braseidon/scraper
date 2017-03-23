@@ -121,15 +121,19 @@ class RollingCurl
     public function request($url, $method = "GET", $postData = null, $headers = null, $options = null)
     {
         $newRequest = new Request($url, $method);
+
         if ($postData) {
             $newRequest->setPostData($postData);
         }
+
         if ($headers) {
             $newRequest->setHeaders($headers);
         }
+
         if ($options) {
             $newRequest->setOptions($options);
         }
+
         return $this->add($newRequest);
     }
 

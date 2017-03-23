@@ -1,7 +1,8 @@
 <?php namespace Braseidon\Scraper;
 
+use Braseidon\Scraper\Exceptions\ScraperException;
 use Braseidon\Scraper\RollingCurl\RollingCurl;
-use Braseidon\Scraper\RollingCurl\Request;
+use Braseidon\Scraper\Request;
 
 class Scraper extends RollingCurl
 {
@@ -35,7 +36,7 @@ class Scraper extends RollingCurl
         CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 20,
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
@@ -58,20 +59,19 @@ class Scraper extends RollingCurl
      */
     public function execute($window_size = null)
     {
-
         # checking $window_size var
         if ($window_size == null) {
-            self::add_debug_msg(" (!) Default threads amount value (5) is used");
+            self::addDebugMessage(" (!) Default threads amount value (5) is used");
         } elseif ($window_size > 0 && is_int($window_size)) {
-            self::add_debug_msg(" # Threads set to:\t$window_size");
+            self::addDebugMessage(" # Threads set to:\t$window_size");
         } else {
             throw new ScraperException(" (!) Wrong threads amount in execute():\t$window_size");
         }
 
         # writing debug
-        self::add_debug_msg(" # Curl C. Timeout ->\t".$this->options[CURLOPT_CONNECTTIMEOUT]." seconds");
-        self::add_debug_msg(" # Curl Timeout ->\t".$this->options[CURLOPT_TIMEOUT]." seconds");
-        self::add_debug_msg(" * Starting connections...");
+        self::addDebugMessage(" # Curl C. Timeout ->\t".$this->options[CURLOPT_CONNECTTIMEOUT]." seconds");
+        self::addDebugMessage(" # Curl Timeout ->\t".$this->options[CURLOPT_TIMEOUT]." seconds");
+        self::addDebugMessage(" * Starting connections...");
         //var_dump($this->__get('requests'));
 
         $time_start = microtime(1);
@@ -79,38 +79,58 @@ class Scraper extends RollingCurl
         $time_end = microtime(1);
         $time_taken = round($time_end-$time_start, 2);
 
-        self::add_debug_msg(" * Finished in ".$time_taken." seconds");
+        self::addDebugMessage(" * Finished in ".$time_taken." seconds");
 
         return $result;
     }
 
     /**
-     * Request execution overload
+     * Create new Request, set a HTTP proxy, and add it to the Request queue
      *
-     * @throws ScraperException
-     * @param string $url Request URL
-     * @param enum(GET/POST) $method
-     * @param array $post_data
-     * @param array $headers
-     * @param array $options
-     * @return bool
+     * @param string       $url
+     * @param string       $proxy    Format: ip:port:user:pass (user/pass optional)
+     * @param string       $method
+     * @param array|string $postData
+     * @param array        $headers
+     * @param array        $options
+     * @return RollingCurl
      */
-    public function request($url, $method = "GET", $postData = null, $headers = null, $options = null)
+    public function proxyRequest($url, $proxy, $method = 'GET', $postData = null, $headers = null, $options = null)
     {
-        parent::request($url, $method, $postData, $headers, $options);
-        return true;
+        $request = new Request($url, $method);
+
+        if ($postData) {
+            $newRequest->setPostData($postData);
+        }
+
+        if ($headers) {
+            $newRequest->setHeaders($headers);
+        }
+
+        if ($options) {
+            $newRequest->setOptions($options);
+        }
+
+        if ($proxy) {
+            $request->addOptions($this->setProxy($proxy));
+        }
+
+        $request->addOptions($this->newUserAgent());
+
+        return $this->add($request);
     }
 
     /**
      * Function to generate a random user agent
      *
+     * @param  array  $options The array of options to modify for a Request
      * @return string
      */
-    public function newUserAgent(array $options)
+    public function newUserAgent(array $options = [])
     {
-        $agents = array();
-        $netclr = array();
-        $sysntv = array();
+        $agents = [];
+        $netclr = [];
+        $sysntv = [];
 
         $ras1 = mt_rand(0, 9);
         $ras2 = mt_rand(0, 255);
@@ -194,80 +214,72 @@ class Scraper extends RollingCurl
     |--------------------------------------------------------------------------
     |
     |
-    |
     */
 
     /**
-     * Sets the Curl object's proxy options using a random proxy
+     * Set a Request's proxy using format ip:port:user:pass
      *
-     * @param array $options
-     * @param mixed $proxy    Proxy can be string or array, as follows: ip:port:user:pass. User/Pass optional
+     * @param  string  $proxy
+     * @param  array   $options
+     * @return array
      */
-    public function setProxy(array $options, $proxy = null)
+    public function setProxy($proxy, array $options = [])
     {
-        if (! is_array($proxy)) {
-            $proxy = explode(':', $proxy);
+        // Sleep for the Proxy cooldown time if there's no Proxies
+        if (empty($proxy)) {
+            throw new ScraperException('A valid proxy must be included. Format: ip:port:user:pass');
         }
 
-        if (! is_array($proxy)) {
-            throw new ScraperException('Proxy format is invalid.');
+        $proxy = $this->parseProxy($proxy);
+
+        // Set the Curl object's options for ip/port, then apply user and pass if not null
+        $options[CURLOPT_PROXY]     = $proxy->ip;
+        $options[CURLOPT_PROXYPORT] = $proxy->port;
+
+        if (! is_null($proxy->user) && ! is_null($proxy->pass)) {
+            $options[CURLOPT_PROXYUSERPWD] = $proxy->user.':'.$proxy->pass;
         }
 
-        if (count($proxy) < 2) {
-            throw new ScraperException('Proxies must include an IP and port (ex. 192.168.0.0.1:80).');
-        }
-
-        // Set the Curl object's options
-        $options[CURLOPT_PROXY]     = $proxy[0];
-        $options[CURLOPT_PROXYPORT] = $proxy[1];
-
-        // Apply user and pass if not empty
-        if (! empty($proxy[2]) && ! empty($proxy[3])) {
-            $options[CURLOPT_PROXYUSERPWD] = $proxy[2] . ':' . $proxy[3];
-        }
-
-        self::add_debug_msg(" + Fetched proxy ->\t {$proxy[0]}:{$proxy[1]}:{$proxy[2]}:{$proxy[3]}");
+        self::addDebugMessage(" + Set proxy ->\t {$proxy->ip}:{$proxy->port}:{$proxy->user}:{$proxy->pass}");
 
         return $options;
     }
 
     /**
-     * Get last used Proxy's data
+     * Explode the proxy by colons and return object
      *
-     * @param  Request $request
-     * @return bool
+     * @param  string $proxy
+     * @return stdClass
      */
-    public function getProxyInfo(Request $request)
+    private function parseProxy($proxy)
     {
-        // Response Info
-        $responseInfo = $request->getResponseInfo();
+        $proxy = explode(':', trim($proxy));
 
-        $last_result = (! isset($responseInfo['http_code'])) ? null : $responseInfo['http_code'];
-        $last_load_time = (! isset($responseInfo['total_time'])) ? null : $responseInfo['total_time'];
-
-        // Request options
-        $requestOptions = $request->options;
-        $ip = (! isset($requestOptions[10004])) ? null : $requestOptions[10004];
-
-        $data = [
-            'last_result'    => $last_result,
-            'last_load_time' => $last_load_time,
-            'error_html'     => null,
+        $proxy = [
+            'ip'   => $proxy[0],
+            'port' => $proxy[1],
+            'user' => (! isset($proxy[2]) ? null : $proxy[2]),
+            'pass' => (! isset($proxy[3]) ? null : $proxy[3]),
         ];
 
-        // If error, save HTML
-        if ($last_result > 200) {
-            $data['error_html'] = $request->getResponseText();
-        }
+        return $this->toObject($proxy);
+    }
 
-        return true;
+    /**
+     * Turn an array into an object
+     *
+     * @param  array    $array
+     * @return stdClass
+     */
+    private function toObject(array $array)
+    {
+        return json_decode(json_encode($array));
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Misc
+    | Debug Console
     |--------------------------------------------------------------------------
-    |
     |
     |
     */
@@ -277,7 +289,7 @@ class Scraper extends RollingCurl
      *
      * @return void
      */
-    public function init_console()
+    public function initConsole()
     {
         self::$console_mode = true;
 
@@ -295,7 +307,7 @@ class Scraper extends RollingCurl
         ob_implicit_flush(1);
 
         # writing debug
-        self::add_debug_msg("## Console mode activated");
+        self::addDebugMessage("## Console mode activated");
     }
 
     /**
@@ -304,7 +316,7 @@ class Scraper extends RollingCurl
      * @param string $msg message
      * @return void
      */
-    public static function add_debug_msg($msg)
+    public static function addDebugMessage($msg)
     {
         if (self::$debug_log) {
             self::$debug_info[] = $msg;
